@@ -12,7 +12,7 @@
 ![pandas](https://img.shields.io/badge/pandas-Data%20Analysis-150458?style=for-the-badge&logo=pandas&logoColor=white)
 ![Jupyter](https://img.shields.io/badge/Jupyter-Notebook-F37626?style=for-the-badge&logo=jupyter&logoColor=white)
 
-📊 **[Narrative summary notebook](notebook/funnel_analysis_summary.ipynb)** · 📄 **[Executive summary](docs/04-executive-summary.md)**
+📊 **[Narrative summary notebook](notebook/funnel_analysis_summary.ipynb)** · 📄 **[Executive summary](docs/04-executive-summary.md)** · 🔬 **[Validation addendum](docs/05-validation-addendum.md)**
 
 </div>
 
@@ -24,6 +24,8 @@
 - Found that **75.7% of sessions never view a single product page** — the largest leak in the funnel, and the *opposite* of the original hypothesis (which assumed checkout was the problem).
 - Ruled out device as the cause — desktop, mobile, and tablet convert at a statistically identical ~24%.
 - Isolated the actual driver: **youtube.com referral traffic**, driving 87.6% of all referral sessions at a 1.3% product-view rate and an 81.1% bounce rate — 2.5x the site-wide baseline.
+- **Validated the finding across 7 days**, not just one — the pattern holds within a tight, consistent band every single day.
+- Used window functions (`ROW_NUMBER()`, `LAG()`) to show youtube.com sessions last **24 seconds on average vs. 209 seconds baseline** — evidence that shifts the likely explanation toward automated/bot traffic.
 - Power-analyzed and simulated an A/B test for the top-ranked fix: a statistically significant **+43.7% relative lift** (p = 0.025).
 - Delivered a RICE-prioritized fix list and a BLUF executive summary with recommendation, supporting numbers, and stated limitations.
 
@@ -61,11 +63,15 @@ flowchart LR
     isolated]
     G --> H[Confirm with
     bounce rate]
-    H --> I[RICE-prioritize
+    H --> I[Validate across
+    7 days]
+    I --> J[ROW_NUMBER/LAG:
+    session duration]
+    J --> K[RICE-prioritize
     fixes]
-    I --> J[Power analysis
+    K --> L[Power analysis
     + simulated A/B test]
-    J --> K[BLUF executive
+    L --> M[BLUF executive
     summary]
 ```
 
@@ -76,9 +82,11 @@ flowchart LR
 | 3. Funnel SQL | Reconstructed sessions with `UNNEST`, computed stage-by-stage conversion via `CASE` / `MAX` flag aggregation |
 | 4. Segmentation | Leading drop-off broken down by device → traffic medium → individual referral domain |
 | 5. Root cause | Confirmed with a bounce-rate (single-pageview) comparison against baseline |
-| 6. Prioritization | 5 candidate fixes scored with RICE, including an explicit sequencing dependency between two of them |
-| 7. Validation design | Power analysis run *before* generating test data; simulated a sample-size-correct A/B test, interpreted via confidence intervals, not just a p-value |
-| 8. Communication | BLUF executive summary + this README |
+| 6. Validation | Re-ran the core comparison across 7 days (not just 1) to confirm the pattern is stable, not a single-day anomaly |
+| 7. Deeper diagnosis | Used `ROW_NUMBER()` and `LAG()` window functions to reconstruct hit sequences and compute session duration, strengthening the root-cause interpretation |
+| 8. Prioritization | 5 candidate fixes scored with RICE, including an explicit sequencing dependency between two of them |
+| 9. Validation design | Power analysis run *before* generating test data; simulated a sample-size-correct A/B test, interpreted via confidence intervals, not just a p-value |
+| 10. Communication | BLUF executive summary + this README |
 
 ---
 
@@ -106,7 +114,7 @@ flowchart LR
 
 > Rules out the common "mobile UX is worse" assumption — a counter-intuitive, evidence-backed result.
 
-### 3. The real driver: one referral source
+### 3. The real driver: one referral source, validated across a full week
 
 | Traffic medium | Sessions | Product-view rate |
 |---|---|---|
@@ -114,11 +122,22 @@ flowchart LR
 | CPC | 25 | 36.0% |
 | **Referral** | **435** | **3.4%** |
 
-Within referral, **youtube.com** alone accounts for 381 of 435 sessions (87.6%) at a 1.3% product-view rate and an **81.1% single-pageview bounce rate** — 2.5x the 32.0% site-wide baseline. Every other referral source converts normally or better.
+Within referral, **youtube.com** alone accounts for 381 of 435 sessions (87.6%) at a 1.3% product-view rate and an **81.1% single-pageview bounce rate** — 2.5x the 32.0% site-wide baseline.
 
-> Two open, unconfirmed hypotheses: landing-page mismatch, or automated/bot traffic. This dataset cannot distinguish between them without user-agent or session-duration data — stated explicitly as a limitation, not papered over.
+Re-running this across **Aug 1–7, 2016** confirms it's not a single-day fluke: youtube.com's product-view rate stays locked in a **1.2%–2.2% band** every day (vs. 23–31% baseline), and bounce rate stays at **73.6%–81.1%** every day (vs. 32–40% baseline). Full breakdown: [`docs/05-validation-addendum.md`](docs/05-validation-addendum.md)
 
-### 4. Simulated A/B test result
+### 4. Session duration confirms "land, glance, leave"
+
+Using `ROW_NUMBER()` and `LAG()` to reconstruct hit sequences and compute session duration:
+
+| Source group | Sessions | Avg session duration | Avg hits per session |
+|---|---|---|---|
+| All other sources | 1,330 | 209.1 sec (~3.5 min) | 9.3 |
+| youtube.com | 381 | 24.4 sec | 1.5 |
+
+> youtube.com sessions last 8.5x less time than baseline and touch barely more than one page. A genuine human clicking through a mismatched landing page would typically take longer than 24 seconds to register and leave — this evidence shifts the balance of probability toward automated/bot traffic as the primary explanation, though it isn't conclusive without user-agent data.
+
+### 5. Simulated A/B test result
 
 Powered for a baseline-to-target lift of 1.3% → 2.0% (α = 0.05, power = 0.80, ~4,049 sessions/arm, ~21-day minimum real-world runtime).
 
@@ -134,7 +153,7 @@ Powered for a baseline-to-target lift of 1.3% → 2.0% (α = 0.05, power = 0.80,
 
 ## ✅ Recommendation
 
-**Ship a contextual welcome banner for youtube.com-referred sessions, with bot-traffic filtering as a prerequisite step** — so the live test isn't measuring against noisy, partially non-human traffic.
+**Ship a contextual welcome banner for youtube.com-referred sessions, with bot-traffic filtering as a prerequisite step** — so the live test isn't measuring against noisy, partially non-human traffic. The session-duration evidence makes this prerequisite a higher-confidence requirement, not just a hedge.
 
 Full RICE scoring and fix alternatives: [`docs/02-rice-prioritization.md`](docs/02-rice-prioritization.md)
 
@@ -142,8 +161,7 @@ Full RICE scoring and fix alternatives: [`docs/02-rice-prioritization.md`](docs/
 
 ## ⚠️ Limitations
 
-- All funnel and segmentation findings are based on a single day of data (Aug 1, 2016) and have not yet been validated across a wider date range.
-- The youtube.com root cause has two plausible, unconfirmed explanations that this dataset cannot distinguish between.
+- The youtube.com root cause has two plausible explanations — landing-page mismatch or automated/bot traffic — that this dataset cannot fully distinguish between without user-agent or IP-reputation data. The session-duration evidence favors the bot-traffic explanation but does not prove it.
 - The A/B test is simulated, not observed; the real test requires ~21 days at current traffic volume, and a novelty effect could inflate an initial live result.
 - Organic traffic converts at only 34%, suggesting a second, smaller, unaddressed leak outside this analysis's scope.
 
@@ -153,7 +171,7 @@ Full caveats and stakeholder-facing summary: [`docs/04-executive-summary.md`](do
 
 ## 🛠️ Tech Stack
 
-- **Querying**: Google BigQuery (Sandbox, no billing) — `UNNEST`, `CASE`/`MAX` flag aggregation, window-style session reconstruction
+- **Querying**: Google BigQuery (Sandbox, no billing) — `UNNEST`, `CASE`/`MAX` flag aggregation, `ROW_NUMBER()`/`LAG()` window functions for session sequencing and duration
 - **Statistical testing**: Python, `statsmodels` (power analysis, two-proportion z-test, Wilson confidence intervals)
 - **Analysis & visualization**: `pandas`, `matplotlib`, Jupyter
 - **Version control**: Git / GitHub
@@ -163,13 +181,14 @@ Full caveats and stakeholder-facing summary: [`docs/04-executive-summary.md`](do
 ## 📁 Project Structure
 
 ```
-funnel-analysis-portfolio/
+ga-funnel-root-cause-analysis/
 ├── README.md
 ├── docs/
 │   ├── 01-kpi-tree.md              # problem statement, KPI tree, hypothesis, first result
 │   ├── 02-rice-prioritization.md   # fix list, RICE scoring, recommendation
 │   ├── 03-ab-test-results.md       # power analysis, simulated test, interpretation
-│   └── 04-executive-summary.md     # BLUF summary for stakeholders
+│   ├── 04-executive-summary.md     # BLUF summary for stakeholders
+│   └── 05-validation-addendum.md   # 7-day validation + session duration analysis
 ├── sql/
 │   ├── 01_session_flag_test.sql
 │   ├── 02_all_funnel_flags.sql
@@ -177,7 +196,9 @@ funnel-analysis-portfolio/
 │   ├── 04_device_segmentation.sql
 │   ├── 05_traffic_medium_segmentation.sql
 │   ├── 06_referral_domain_breakdown.sql
-│   └── 07_bounce_rate_by_source.sql
+│   ├── 07_bounce_rate_by_source.sql
+│   ├── 08_multiday_validation.sql
+│   └── 09_session_duration_analysis.sql
 ├── analysis/
 │   ├── ab_test_simulation.py
 │   └── ab_test_simulated_sessions.csv
@@ -190,12 +211,12 @@ funnel-analysis-portfolio/
 ## 🚀 How to Reproduce
 
 ```bash
-git clone https://github.com/tarunmaurya13/funnel-analysis-portfolio.git
-cd funnel-analysis-portfolio
+git clone https://github.com/tarunmaurya13/ga-funnel-root-cause-analysis.git
+cd ga-funnel-root-cause-analysis
 ```
 
 1. Open [BigQuery](https://console.cloud.google.com/bigquery) — no billing required (Sandbox mode).
-2. Run the queries in `sql/` in order against `bigquery-public-data.google_analytics_sample.ga_sessions_20160801` (or any date in the dataset).
+2. Run the queries in `sql/` in order against `bigquery-public-data.google_analytics_sample.ga_sessions_*` (single-date queries use `ga_sessions_20160801`; `08_multiday_validation.sql` queries Aug 1–7 via wildcard table).
 3. Reproduce the A/B test simulation:
    ```bash
    pip install statsmodels pandas numpy
@@ -207,8 +228,7 @@ cd funnel-analysis-portfolio
 
 ## 📈 Future Improvements
 
-- Extend the funnel and segmentation queries across the full Aug 2016–Aug 2017 date range to confirm the youtube.com pattern is stable, not a single-day anomaly
-- Add `user_agent` / bot-classification logic to distinguish landing-page mismatch from automated traffic
+- Add `user_agent` / bot-classification logic to conclusively confirm the automated-traffic hypothesis on youtube.com sessions
 - Run the A/B test live and follow up with a 4–6 week confirmation test to rule out novelty effect
 - Investigate the secondary, unaddressed leak in organic traffic (34% product-view rate)
 
@@ -219,7 +239,7 @@ cd funnel-analysis-portfolio
 ## 👤 Author
 
 **Tarun Maurya**
-Final-year BCA (AI), Invertis University
+BCA (AI), Invertis University
 [GitHub](https://github.com/tarunmaurya13)
 
 </div>
